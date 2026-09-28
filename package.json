@@ -1,0 +1,46 @@
+{
+  "name": "@aiwayds/dsh-jev-core",
+  "version": "0.1.0",
+  "description": "Shared TypeSafe Jev decision-model client for the dsh ecosystem: strict response validation, keychain-first key resolution, typed fail-open errors. Jev-optional by design.",
+  "keywords": [
+    "typesafe",
+    "jev",
+    "decision-model",
+    "llm",
+    "classification",
+    "dsh"
+  ],
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    }
+  },
+  "files": [
+    "lib",
+    "README.en.md"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "pretest": "npm run build",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^5.9.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fan56/dsh-jev-core.git"
+  },
+  "homepage": "https://github.com/fan56/dsh-jev-core#readme",
+  "bugs": "https://github.com/fan56/dsh-jev-core/issues"
+}
