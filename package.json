@@ -42,5 +42,8 @@
     "url": "git+https://github.com/fan56/dsh-jev-core.git"
   },
   "homepage": "https://github.com/fan56/dsh-jev-core#readme",
-  "bugs": "https://github.com/fan56/dsh-jev-core/issues"
+  "bugs": "https://github.com/fan56/dsh-jev-core/issues",
+  "dependencies": {
+    "undici": "^8.11.2"
+  }
 }

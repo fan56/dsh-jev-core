@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.1.2 - 2026-09-28
+
+- Fix issue #1: long-lived host processes timed out on every call after the
+  first — the global undici pool kept reusing a connection the intermediary
+  had silently dropped (fresh processes reached the endpoint in ~400ms, so
+  config/key/DNS were ruled out). `classify` now rides a throwaway
+  `undici.Agent` per call (`close()`d in a finally), trading one extra TLS
+  handshake for calls that always land. Regression test asserts two calls
+  ride two server-observed connections.
+
 ## 0.1.0 - 2026-09-28
 
 First release. Scope per the wayfinder decision ticket (dsh-jev-core API 面):
