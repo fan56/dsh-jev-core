@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.1.4 - 2026-09-28
+
+- Revert the 0.1.2/0.1.3 transport experiments (issue #1 stays OPEN):
+  - 0.1.2: npm-undici Agent + built-in fetch — version mismatch on Node 22
+    ("invalid onRequestStart method"), never published.
+  - 0.1.3: same-source npm-undici Agent+fetch — lands fine in a plain
+    process (460ms) but fails inside the real dsh host process ("fetch
+    failed"); root cause not yet found (host network layer interaction).
+  - 0.1.4 restores the 0.1.0 global-fetch transport: first call per process
+    lands, later calls may hit the pooled-dead-connection timeout and fail
+    OPEN exactly as designed. Both dead ends are documented on issue #1.
+
 ## 0.1.3 - 2026-09-28
 
 - Fix the 0.1.2 CI break (the 0.1.2 tag never reached npm): pairing the npm

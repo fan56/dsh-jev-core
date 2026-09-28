@@ -11,16 +11,6 @@ import type { JevAnswers, JevClassifyResult, JevQuestions } from './types.ts'
 import { JevHttpError, JevInvalidResponseError, JevNoKeyError, JevTimeoutError } from './errors.ts'
 import { KEY_SOURCES, readKey, type KeySources } from './key.ts'
 import { normalizeAnswers, normalizeUsage } from './validate.ts'
-// One-shot connections, on purpose (issue #1): advisory consumers live in
-// long-lived host processes where the global undici pool happily reuses a
-// connection an intermediary silently dropped — every call after the first
-// then hangs to its deadline. A per-call Agent closes the socket when the
-// call ends, trading one extra TLS handshake (~400ms) for calls that always
-// land. The jev call rate (on-demand / 30s-debounced) makes the trade obvious.
-// BOTH the Agent and the fetch come from the npm undici package: pairing an
-// npm-undici Agent with the BUILT-IN global fetch is a version mismatch
-// (Node 22 CI: "invalid onRequestStart method") — the pair must be same-source.
-import { Agent, fetch as undiciFetch } from 'undici'
 
 export const DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
 /** Pinned versioned id, never an alias — aliases drift silently across releases and invalidate thresholds and eval numbers. */
@@ -88,28 +78,19 @@ export async function classify(options: JevCallOptions): Promise<JevClassifyResu
   const timeoutSignal = AbortSignal.timeout(config.timeoutMs)
   const signal = options.signal !== undefined ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal
 
-  // A throwaway connection per call (see the undici import note). `close()`
-  // in the finally keeps sockets from piling up; the Agent and fetch are the
-  // same undici source, and an injected fetchImpl bypasses the agent entirely.
-  const agent = new Agent()
   let response: Response
   try {
-    response = await (options.fetchImpl ?? ((input: string, init: RequestInit) =>
-      undiciFetch(input, { ...init, dispatcher: agent } as never) as unknown as Promise<Response>))(
-      config.endpoint,
-      {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${key}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(buildRequestBody(options.questions, options.state, config.model)),
-        redirect: 'error',
-        signal,
+    response = await (options.fetchImpl ?? fetch)(config.endpoint, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${key}`,
+        'content-type': 'application/json',
       },
-    )
+      body: JSON.stringify(buildRequestBody(options.questions, options.state, config.model)),
+      redirect: 'error',
+      signal,
+    })
   } catch (error) {
-    await agent.close().catch(() => {})
     if (options.signal?.aborted && isAbortError(error)) throw error
     if (isAbortError(error) || (error instanceof Error && error.name === 'TimeoutError')) {
       throw new JevTimeoutError(config.timeoutMs)
@@ -117,28 +98,24 @@ export async function classify(options: JevCallOptions): Promise<JevClassifyResu
     throw error
   }
 
+  if (!response.ok) {
+    const body = (await response.text().catch(() => '')).slice(0, 200)
+    throw new JevHttpError(response.status, body)
+  }
+
+  let payload: unknown
   try {
-    if (!response.ok) {
-      const body = (await response.text().catch(() => '')).slice(0, 200)
-      throw new JevHttpError(response.status, body)
-    }
+    payload = await response.json()
+  } catch (error) {
+    throw new JevInvalidResponseError(`body is not JSON (${error instanceof Error ? error.message : String(error)})`)
+  }
 
-    let payload: unknown
-    try {
-      payload = await response.json()
-    } catch (error) {
-      throw new JevInvalidResponseError(`body is not JSON (${error instanceof Error ? error.message : String(error)})`)
-    }
-
-    const answers: JevAnswers = normalizeAnswers(payload, options.questions)
-    const answered = payload as { model?: unknown; usage?: unknown }
-    return {
-      answers,
-      model: typeof answered.model === 'string' && answered.model !== '' ? answered.model : config.model,
-      usage: normalizeUsage(answered.usage),
-      latencyMs: Date.now() - startedAt,
-    }
-  } finally {
-    await agent.close().catch(() => {})
+  const answers: JevAnswers = normalizeAnswers(payload, options.questions)
+  const answered = payload as { model?: unknown; usage?: unknown }
+  return {
+    answers,
+    model: typeof answered.model === 'string' && answered.model !== '' ? answered.model : config.model,
+    usage: normalizeUsage(answered.usage),
+    latencyMs: Date.now() - startedAt,
   }
 }
