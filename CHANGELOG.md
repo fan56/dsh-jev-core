@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+## 0.1.3 - 2026-09-28
+
+- Fix the 0.1.2 CI break (the 0.1.2 tag never reached npm): pairing the npm
+  undici package's `Agent` with the BUILT-IN global fetch is a version
+  mismatch ("invalid onRequestStart method" on Node 22). The Agent and the
+  fetch now both come from the npm undici package — same source, no mismatch.
+
 ## 0.1.2 - 2026-09-28
 
 - Fix issue #1: long-lived host processes timed out on every call after the

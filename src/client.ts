@@ -17,7 +17,10 @@ import { normalizeAnswers, normalizeUsage } from './validate.ts'
 // then hangs to its deadline. A per-call Agent closes the socket when the
 // call ends, trading one extra TLS handshake (~400ms) for calls that always
 // land. The jev call rate (on-demand / 30s-debounced) makes the trade obvious.
-import { Agent } from 'undici'
+// BOTH the Agent and the fetch come from the npm undici package: pairing an
+// npm-undici Agent with the BUILT-IN global fetch is a version mismatch
+// (Node 22 CI: "invalid onRequestStart method") — the pair must be same-source.
+import { Agent, fetch as undiciFetch } from 'undici'
 
 export const DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone'
 /** Pinned versioned id, never an alias — aliases drift silently across releases and invalidate thresholds and eval numbers. */
@@ -85,14 +88,14 @@ export async function classify(options: JevCallOptions): Promise<JevClassifyResu
   const timeoutSignal = AbortSignal.timeout(config.timeoutMs)
   const signal = options.signal !== undefined ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal
 
-  // A throwaway connection per call (see the Agent import note). `close()`
-  // in the finally keeps sockets from piling up; the dispatcher option rides
-  // the same undici implementation behind the global fetch.
+  // A throwaway connection per call (see the undici import note). `close()`
+  // in the finally keeps sockets from piling up; the Agent and fetch are the
+  // same undici source, and an injected fetchImpl bypasses the agent entirely.
   const agent = new Agent()
   let response: Response
   try {
-    response = await (options.fetchImpl ?? ((input: string, init: RequestInit & { dispatcher?: unknown }) =>
-      fetch(input, { ...init, dispatcher: agent } as RequestInit)))(
+    response = await (options.fetchImpl ?? ((input: string, init: RequestInit) =>
+      undiciFetch(input, { ...init, dispatcher: agent } as never) as unknown as Promise<Response>))(
       config.endpoint,
       {
         method: 'POST',
@@ -103,7 +106,7 @@ export async function classify(options: JevCallOptions): Promise<JevClassifyResu
         body: JSON.stringify(buildRequestBody(options.questions, options.state, config.model)),
         redirect: 'error',
         signal,
-      } as RequestInit,
+      },
     )
   } catch (error) {
     await agent.close().catch(() => {})
