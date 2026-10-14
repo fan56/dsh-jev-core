@@ -191,15 +191,29 @@ test('classify: response with invalid usage still succeeds, usage null', async (
   assert.equal(result.usage, null)
 })
 
+/**
+ * The pooled-dead-connection shape over an injected fetch: the request never
+ * answers until the attempt's own deadline aborts it. The ref'd keepAlive
+ * timer matters — `AbortSignal.timeout` is unref'd, so in a bare test process
+ * (no ref'd work, unlike a real host) the event loop can drain and exit with
+ * this promise still pending; the timer holds the loop until the abort fires.
+ */
+function hangUntilAborted(init, onAbort) {
+  return new Promise((_, reject) => {
+    const keepAlive = setTimeout(() => {}, 10_000)
+    init.signal.addEventListener('abort', () => {
+      clearTimeout(keepAlive)
+      if (onAbort) onAbort()
+      reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+    })
+  })
+}
+
 test('classify: retries: 1 — a timed-out attempt is retried and the second lands', async () => {
   let calls = 0
   const flakyFirst = (_url, init) => {
     calls++
-    if (calls === 1) {
-      return new Promise((_, reject) => {
-        init.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError')))
-      })
-    }
+    if (calls === 1) return hangUntilAborted(init)
     return okResponse(fixturePayload)
   }
   const t0 = Date.now()
@@ -212,10 +226,10 @@ test('classify: retries: 1 — a timed-out attempt is retried and the second lan
 
 test('classify: retries: 1 — both attempts timing out still throws JevTimeoutError within the budget', async () => {
   let calls = 0
-  const alwaysSlow = (_url, init) => new Promise((_, reject) => {
+  const alwaysSlow = (_url, init) => {
     calls++
-    init.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError')))
-  })
+    return hangUntilAborted(init)
+  }
   const t0 = Date.now()
   await assert.rejects(
     classify({ ...noAmbientKey, questions, state: 's', apiKey: 'k', fetchImpl: alwaysSlow, timeoutMs: 400, retries: 1 }),
@@ -231,13 +245,10 @@ test('classify: retries: 1 — both attempts timing out still throws JevTimeoutE
 
 test('classify: the retry budget is carved out of earlier attempts (≈ half, capped at 2s)', async () => {
   const abortDelays = []
-  const slow = (_url, init) => new Promise((_, reject) => {
+  const slow = (_url, init) => {
     const started = Date.now()
-    init.signal.addEventListener('abort', () => {
-      abortDelays.push(Date.now() - started)
-      reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
-    })
-  })
+    return hangUntilAborted(init, () => abortDelays.push(Date.now() - started))
+  }
   await assert.rejects(
     classify({ ...noAmbientKey, questions, state: 's', apiKey: 'k', fetchImpl: slow, timeoutMs: 400, retries: 1 }),
     JevTimeoutError,
