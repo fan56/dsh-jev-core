@@ -52,7 +52,7 @@ if (isConfigured()) {
 
 | Export | Purpose |
 | --- | --- |
-| `classify(options)` | One judgment call; resolves `{ answers, model, usage, latencyMs }` or throws a typed error |
+| `classify(options)` | One judgment call; resolves `{ answers, model, usage, latencyMs }` or throws a typed error. `timeoutMs` is the **total budget**; `retries` (default 0, cap 3) adds attempts after a timeout without ever exceeding it |
 | `buildRequestBody(questions, state, model)` | The exact request body (deep-clones questions) — for contract tests and replay tooling |
 | `normalizeAnswers(payload, questions)` | The strict validator itself; reused by replay and unit tests |
 | `normalizeUsage(payload)` | Usage-metadata validation; violations degrade to null (metadata never sinks a valid decision) |
@@ -83,7 +83,8 @@ Any failure outside the keychain — missing entry, no binary, non-macOS — res
 
 ## Design boundaries (deliberately absent)
 
-- **No retries in the core**: a once-triggered caller deserves one retry, a fire-and-forget caller does not — that is caller policy
+- **No retries by default; whether to retry stays caller policy**: `classify` is one call unless the caller opts in with `retries`, which re-attempts timeouts only (the failure it cures is a pooled dead connection in a long-lived host process — the abort frees the poisoned socket, the retry lands on a fresh one) and divides the caller's `timeoutMs` budget across attempts. A blocking, explicitly-triggered caller passes 1; a fire-and-forget caller does not — the core never retries on its own
+- **Transport rides global fetch; never build your own dispatcher**: the dsh host installs a process-wide global dispatcher at boot (`dsh-http-proxy`'s egress policy), which global fetch follows for free. A hand-built `undici.Agent` passed as `dispatcher` **silently bypasses** it — the real reason both 0.1.2/0.1.3 transport experiments died, not a bug: the host's `verify-no-bare-dispatcher` gate bans the pattern outright. Don't try again
 - **No caching**: consumers whose state text changes every turn have a ~0% hit rate
 - **No circuit breaking**: breakers exist for execution-model failover; an advisory call's fail-open (skip) already is the fallback
 - **Corrupt usage never fails the call**: metadata degrades to null

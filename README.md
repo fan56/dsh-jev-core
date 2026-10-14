@@ -52,7 +52,7 @@ if (isConfigured()) {
 
 | 导出 | 说明 |
 | --- | --- |
-| `classify(options)` | 发起一次判定调用；成功返回 `{ answers, model, usage, latencyMs }`，失败抛类型化错误 |
+| `classify(options)` | 发起一次判定调用；成功返回 `{ answers, model, usage, latencyMs }`，失败抛类型化错误。`timeoutMs` 是**总预算**；`retries`（默认 0，上限 3）只在超时后加试，且不越过总预算 |
 | `buildRequestBody(questions, state, model)` | 精确的请求体（深克隆 questions）——契约测试与 replay 工具用 |
 | `normalizeAnswers(payload, questions)` | 严格校验器本体；replay/单测复用 |
 | `normalizeUsage(payload)` | usage 元数据校验；损坏降级为 null（元数据不拖垮有效判定） |
@@ -83,7 +83,8 @@ if (isConfigured()) {
 
 ## 设计边界（刻意不做）
 
-- **重试不进 core**：once 触发的调用方值得重试一次，fire-and-forget 的不值得——是调用方政策
+- **重试默认不发生，要不要重试仍是调用方政策**：`classify` 默认单次调用；`retries` 是显式 opt-in，只重试超时（它治的病是长驻进程连接池里的死连接——中止释放坏连接，重试走新连接就落地），且各次尝试共享 `timeoutMs` 总预算。once 触发的阻塞调用方值得传 1，fire-and-forget 的不值得——传不传由调用方定，core 绝不自作主张
+- **transport 只走 global fetch，别自建 dispatcher**：dsh 宿主启动时装进程级全局 dispatcher（`dsh-http-proxy` 的出口政策），global fetch 天然遵守；自建 `undici.Agent` 当 `dispatcher` 会**静默绕过**它——0.1.2/0.1.3 两次传输实验的真正死因不是 bug，是宿主 `verify-no-bare-dispatcher` 门禁明令禁止的写法。别再试了
 - **缓存不进 core**：逐 turn 文本各不相同的消费方命中率≈0
 - **熔断不进 core**：熔断是执行模型 failover 的事；建议型调用 fail-open（跳过）已是兜底
 - **usage 损坏不失败**：元数据问题降级 null，不拖垮有效判定
@@ -91,7 +92,7 @@ if (isConfigured()) {
 
 ## 生态消费方
 
-- `@aiwayds/dsh-jev-dispatch`（规划中）：agent/pre-step 事前派发建议
+- `@aiwayds/dsh-agent-dispatch`：agent/pre-step 事前派发建议（`retries: 1`）
 - dsh-tui-pi attention（规划中）：子代理事中 attention 打分
 - [dsh-jev-mcp](https://github.com/fan56/dsh-jev-mcp)（MCP 形态，独立实现）：keychain/endpoint 约定与本包同源
 

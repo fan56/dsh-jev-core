@@ -190,3 +190,99 @@ test('classify: response with invalid usage still succeeds, usage null', async (
   const result = await classify({ questions, state: 's', apiKey: 'k', fetchImpl })
   assert.equal(result.usage, null)
 })
+
+test('classify: retries: 1 — a timed-out attempt is retried and the second lands', async () => {
+  let calls = 0
+  const flakyFirst = (_url, init) => {
+    calls++
+    if (calls === 1) {
+      return new Promise((_, reject) => {
+        init.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError')))
+      })
+    }
+    return okResponse(fixturePayload)
+  }
+  const t0 = Date.now()
+  const result = await classify({ ...noAmbientKey, questions, state: 's', apiKey: 'k', fetchImpl: flakyFirst, timeoutMs: 1_000, retries: 1 })
+  assert.equal(calls, 2)
+  assert.equal(result.answers.go.value, 0.82)
+  // The caller's deadline contract holds no matter how the attempts split it.
+  assert.ok(Date.now() - t0 < 1_000, `total ${Date.now() - t0}ms must stay within the 1000ms budget`)
+})
+
+test('classify: retries: 1 — both attempts timing out still throws JevTimeoutError within the budget', async () => {
+  let calls = 0
+  const alwaysSlow = (_url, init) => new Promise((_, reject) => {
+    calls++
+    init.signal.addEventListener('abort', () => reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError')))
+  })
+  const t0 = Date.now()
+  await assert.rejects(
+    classify({ ...noAmbientKey, questions, state: 's', apiKey: 'k', fetchImpl: alwaysSlow, timeoutMs: 400, retries: 1 }),
+    (error) => {
+      assert.ok(error instanceof JevTimeoutError)
+      assert.equal(error.code, 'timeout')
+      return true
+    },
+  )
+  assert.equal(calls, 2)
+  assert.ok(Date.now() - t0 < 700, `total ${Date.now() - t0}ms must stay within the 400ms budget (+ slack)`)
+})
+
+test('classify: the retry budget is carved out of earlier attempts (≈ half, capped at 2s)', async () => {
+  const abortDelays = []
+  const slow = (_url, init) => new Promise((_, reject) => {
+    const started = Date.now()
+    init.signal.addEventListener('abort', () => {
+      abortDelays.push(Date.now() - started)
+      reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+    })
+  })
+  await assert.rejects(
+    classify({ ...noAmbientKey, questions, state: 's', apiKey: 'k', fetchImpl: slow, timeoutMs: 400, retries: 1 }),
+    JevTimeoutError,
+  )
+  // timeoutMs 400 → reserve = min(2000, 200) = 200: attempt 1 gives up 200ms,
+  // attempt 2 rides the remaining 200ms.
+  assert.ok(abortDelays[0] >= 150 && abortDelays[0] < 350, `attempt 1 aborted at ${abortDelays[0]}ms, expected ≈200ms`)
+  assert.ok(abortDelays[1] >= 120 && abortDelays[1] < 400, `attempt 2 aborted at ${abortDelays[1]}ms, expected ≈200ms`)
+})
+
+test('classify: a network failure (TypeError with cause) is flattened into the message and never retried', async () => {
+  let calls = 0
+  const boom = () => {
+    calls++
+    throw new TypeError('fetch failed', { cause: new Error('other side closed', { cause: new Error('ECONNRESET') }) })
+  }
+  await assert.rejects(
+    classify({ ...noAmbientKey, questions, state: 's', apiKey: 'k', fetchImpl: boom, retries: 1 }),
+    (error) => {
+      assert.ok(error instanceof TypeError)
+      assert.match(error.message, /fetch failed \(Error: other side closed\): \(Error: ECONNRESET\)/)
+      return true
+    },
+  )
+  assert.equal(calls, 1, 'only timeouts retry — a network error would recur')
+})
+
+test('classify: retries never fire on a caller abort', async () => {
+  let calls = 0
+  const aborting = () => {
+    calls++
+    return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'))
+  }
+  await assert.rejects(
+    classify({ ...noAmbientKey, questions, state: 's', apiKey: 'k', fetchImpl: aborting, retries: 1, signal: AbortSignal.abort() }),
+    (error) => error.name === 'AbortError',
+  )
+  assert.equal(calls, 1)
+})
+
+test('classify: retries must be an integer in [0, 3]', async () => {
+  for (const bad of [1.5, -1, 4, '1']) {
+    await assert.rejects(
+      classify({ ...noAmbientKey, questions, state: 's', apiKey: 'k', fetchImpl: async () => okResponse(fixturePayload), retries: bad }),
+      TypeError,
+    )
+  }
+})

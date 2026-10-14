@@ -1,10 +1,13 @@
 /**
- * The HTTP client: one call, N atomic questions, no retries, no cache, no
- * fallback. Transport policy is deliberately boring — a 5s total deadline
- * covering the whole exchange, `redirect: "error"` (an endpoint that
- * redirects is a misconfiguration, not a hint to follow), and the caller's
- * signal honored as-is (a caller abort rethrows as AbortError, never
- * masquerades as a timeout).
+ * The HTTP client: one call, N atomic questions, no cache, no fallback.
+ * Transport policy is deliberately boring — a 5s total deadline covering the
+ * whole exchange, `redirect: "error"` (an endpoint that redirects is a
+ * misconfiguration, not a hint to follow), and the caller's signal honored
+ * as-is (a caller abort rethrows as AbortError, never masquerades as a
+ * timeout). Retries are opt-in and only ever re-attempt a timeout, inside the
+ * SAME total deadline (see `retries`): the one failure mode they fix is a
+ * pooled dead connection, where the retry's fresh connection is the cure and
+ * any other error would fail the same way twice.
  */
 
 import type { JevAnswers, JevClassifyResult, JevQuestions } from './types.ts'
@@ -33,6 +36,16 @@ export interface JevCallOptions extends KeySources {
   endpoint?: string
   model?: string
   timeoutMs?: number
+  /**
+   * Extra attempts after a `JevTimeoutError`, inside the SAME total deadline
+   * (`timeoutMs` is never exceeded — earlier attempts give up time to later
+   * ones). Only a timeout retries: the failure it cures is a pooled dead
+   * connection in a long-lived host process, where the abort destroys the
+   * poisoned socket and the retry rides a fresh one that lands; any other
+   * error (HTTP status, bad key, invalid body) would recur, so it throws
+   * immediately. 0 (default) keeps the strict one-call contract.
+   */
+  retries?: number
   /** Total deadline override; covers connection, write, and body read. */
   signal?: AbortSignal
   /** Injectable for tests and for routing through a proxy. */
@@ -63,6 +76,29 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+/** The deadline fired (ours or a caller's AbortSignal.timeout bubbling through). */
+function isDeadlineError(error: unknown): boolean {
+  return isAbortError(error) || (error instanceof Error && error.name === 'TimeoutError')
+}
+
+/**
+ * A `fetch` network failure arrives as `TypeError: fetch failed` with the real
+ * reason (TLS, DNS, reset, proxy) buried in `.cause` — often two levels deep.
+ * Flattening the chain into the message is what makes a verdict-log row
+ * diagnosable; the 0.1.3 in-host investigation was blinded by exactly this
+ * gap. The error object is ours to throw, so the type and `cause` stay intact.
+ */
+function flattenCause(error: Error): Error {
+  let cause: unknown = error.cause
+  let detail = ''
+  for (let depth = 0; cause !== undefined && cause !== null && depth < 3; depth++) {
+    detail += (detail === '' ? ' ' : ': ') + `(${cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause)})`
+    cause = cause instanceof Error ? (cause.cause as unknown) : undefined
+  }
+  if (detail !== '') error.message = `${error.message}${detail}`
+  return error
+}
+
 /**
  * Ask Jev one batched question set. Resolves with the strictly validated
  * answers or throws a typed JevError — there is no third outcome.
@@ -75,27 +111,46 @@ export async function classify(options: JevCallOptions): Promise<JevClassifyResu
   const key = readKey(options)
   if (key === null) throw new JevNoKeyError(KEY_SOURCES)
 
-  const timeoutSignal = AbortSignal.timeout(config.timeoutMs)
-  const signal = options.signal !== undefined ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal
+  const retries = options.retries ?? 0
+  if (!Number.isInteger(retries) || retries < 0 || retries > 3) {
+    throw new TypeError(`retries must be an integer in [0, 3], got ${options.retries}`)
+  }
+  const attempts = 1 + retries
 
   let response: Response
-  try {
-    response = await (options.fetchImpl ?? fetch)(config.endpoint, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${key}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(buildRequestBody(options.questions, options.state, config.model)),
-      redirect: 'error',
-      signal,
-    })
-  } catch (error) {
-    if (options.signal?.aborted && isAbortError(error)) throw error
-    if (isAbortError(error) || (error instanceof Error && error.name === 'TimeoutError')) {
-      throw new JevTimeoutError(config.timeoutMs)
+  for (let attempt = 1; ; attempt++) {
+    // Later attempts are paid for by earlier ones: every non-final attempt
+    // reserves half the total budget (capped at 2s — a fresh connection that
+    // cannot land in 2s will not land in 5s either), so the caller's deadline
+    // contract holds no matter how the attempts divide it.
+    const reserveMs = attempt < attempts ? Math.min(2_000, Math.ceil(config.timeoutMs / 2)) : 0
+    const remainingMs = config.timeoutMs - (Date.now() - startedAt)
+    const attemptTimeoutMs = Math.max(1, remainingMs - reserveMs)
+    const timeoutSignal = AbortSignal.timeout(attemptTimeoutMs)
+    const signal = options.signal !== undefined ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal
+
+    try {
+      response = await (options.fetchImpl ?? fetch)(config.endpoint, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${key}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(buildRequestBody(options.questions, options.state, config.model)),
+        redirect: 'error',
+        signal,
+      })
+      break
+    } catch (error) {
+      if (options.signal?.aborted && isAbortError(error)) throw error
+      if (isDeadlineError(error)) {
+        // No backoff on purpose: the retry's value IS the fresh connection the
+        // abort just freed, and any wait only eats the budget it rides on.
+        if (attempt < attempts && Date.now() - startedAt < config.timeoutMs) continue
+        throw new JevTimeoutError(config.timeoutMs)
+      }
+      throw error instanceof Error ? flattenCause(error) : error
     }
-    throw error
   }
 
   if (!response.ok) {

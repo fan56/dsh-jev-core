@@ -4,6 +4,34 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- fix: `retries` option — opt-in timeout-only retries inside the SAME total
+  deadline (issue #1, the shipped fix). A long-lived host process rides the
+  process-wide connection pool, and the first call after an idle gap can draw
+  a connection the intermediary silently dropped: it hangs to its deadline,
+  every time, while a fresh process lands in ~400ms. `retries: 1` re-attempts
+  a timeout once; the abort destroys the poisoned socket, so the retry rides a
+  fresh connection and lands. The caller's deadline contract is unchanged —
+  earlier attempts give up budget (half the total, capped at 2s) so the total
+  never exceeds `timeoutMs`. Only timeouts retry: any other error (HTTP
+  status, bad key, invalid body) would recur, so it throws immediately. The
+  design-boundary note is amended, not abandoned: whether to opt in stays
+  caller policy — the core never retries on its own.
+  `test/dead-pool.integration.test.mjs` pins the shape over the REAL
+  transport: a local server answers a connection's first request and swallows
+  the rest, and the suite asserts the retry's success comes from a fresh
+  connection's first request while the total stays under the caller's
+  deadline.
+- fix: network failures now carry their cause chain in the message
+  (`fetch failed (TypeError: ...): (Error: ...)`). The 0.1.3 in-host
+  investigation was blinded by exactly this gap: the verdict log recorded
+  "fetch failed" while the real reason (TLS/DNS/proxy, often nested in
+  `.cause`) was discarded.
+- docs: the "no bare dispatcher" policy is now written down where the next
+  transport experiment will read it — a per-call `undici.Agent` passed as
+  `dispatcher` silently bypasses the host's process-wide proxy policy
+  (`dsh-http-proxy`), which is why both 0.1.2/0.1.3 pairings were dead ends
+  by policy, not just by bug.
+
 ## 0.1.4 - 2026-09-28
 
 - Revert the 0.1.2/0.1.3 transport experiments (issue #1 stays OPEN):
