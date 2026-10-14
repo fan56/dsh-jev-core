@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## 0.1.5 - 2026-10-14
 
 - fix: `retries` option — opt-in timeout-only retries inside the SAME total
   deadline (issue #1, the shipped fix). A long-lived host process rides the
