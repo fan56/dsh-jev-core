@@ -4,8 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
-- 0.2.2-rc.1 wave: zero-change repo (no host seam, no `@deepseek-ai/*` pins, no CI closure-tower block) — dependencies reinstalled against registry.npmjs.org and verified green as-is: typecheck clean, 50/0 tests.
-- 0.2.1-rc.2 wave: zero-change repo (no host seam, no `@deepseek-ai/*` pins, no CI closure-tower block) — dependencies reinstalled against registry.npmjs.org and verified green as-is: typecheck clean, 50/0 tests.
+- 0.2.2-rc.1 wave: zero-change repo (no host seam, no `@deepseek-ai/*` pins, no CI closure-tower block) — verified green as-is: typecheck clean, 50/0 tests. Correction: the wave note's `dependencies reinstalled against registry.npmjs.org` claim was wrong — the lock came back byte-identical with all 3 resolved URLs on registry.npmmirror.com (the reinstall leaked through the global npmrc mirror). The resolved hosts are now repointed to registry.npmjs.org: same tarballs, each integrity pre-verified against npmjs.org (`npm view dist.integrity`), and a scratch `npm ci --registry=https://registry.npmjs.org` installs clean.
+- 0.2.1-rc.2 wave: zero-change repo (no host seam, no `@deepseek-ai/*` pins, no CI closure-tower block) — dependencies reinstalled against registry.npmjs.org and verified green as-is: typecheck clean, 50/0 tests. (Postscript 2026-11-05: that reinstall also carried registry.npmmirror.com resolved URLs into the lock; corrected by the repoint above.)
 
 ## 0.1.5 - 2026-10-14
 
