@@ -4,6 +4,7 @@ All notable changes to this project are documented in this file.
 
 ## Unreleased
 
+- 0.2.2-rc.1 wave: zero-change repo (no host seam, no `@deepseek-ai/*` pins, no CI closure-tower block) — dependencies reinstalled against registry.npmjs.org and verified green as-is: typecheck clean, 50/0 tests.
 - 0.2.1-rc.2 wave: zero-change repo (no host seam, no `@deepseek-ai/*` pins, no CI closure-tower block) — dependencies reinstalled against registry.npmjs.org and verified green as-is: typecheck clean, 50/0 tests.
 
 ## 0.1.5 - 2026-10-14
