@@ -1,6 +1,6 @@
 {
   "name": "@aiwayds/dsh-jev-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared TypeSafe Jev decision-model client for the dsh ecosystem: strict response validation, keychain-first key resolution, typed fail-open errors. Jev-optional by design.",
   "keywords": [
     "typesafe",
