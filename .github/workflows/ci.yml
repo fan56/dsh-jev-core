@@ -1,5 +1,5 @@
-# CI: typecheck + tests on every push to main, every pull request, and a
-# daily schedule. This is a pure zero-dependency lib (no dsh host closure to
+# CI: typecheck + tests on every push to main and every pull request.
+# This is a pure zero-dependency lib (no dsh host closure to
 # track), so the workflow is deliberately lean — no dsh CLI boot smoke, no
 # closure linking. The tests run against the built lib/ (pretest builds), so
 # the published surface is what gets tested.
@@ -9,9 +9,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    # Daily 03:33 UTC — catches Node/toolchain drift.
-    - cron: '33 3 * * *'
 
 permissions:
   contents: read
