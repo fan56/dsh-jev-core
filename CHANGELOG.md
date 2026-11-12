@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+- 0.2.2-rc.2 wave: zero-change repo (no host seam, no `@deepseek-ai/*` pins, no CI closure-tower block — ci.yml is deliberately lean for this pure zero-dependency lib) — verified green as-is: typecheck clean, 50/0 tests. Housekeeping: `package-lock.json` still recorded the pre-bump version `0.1.0` in its two header fields; regenerated against registry.npmjs.org so the lock matches the 0.2.0 manifest (all resolved URLs stay on registry.npmjs.org, no mirror leakage).
+
 ## 0.2.0 - 2026-11-06
 
 - 0.2.2-rc.1 wave: zero-change repo (no host seam, no `@deepseek-ai/*` pins, no CI closure-tower block) — verified green as-is: typecheck clean, 50/0 tests. Correction: the wave note's `dependencies reinstalled against registry.npmjs.org` claim was wrong — the lock came back byte-identical with all 3 resolved URLs on registry.npmmirror.com (the reinstall leaked through the global npmrc mirror). The resolved hosts are now repointed to registry.npmjs.org: same tarballs, each integrity pre-verified against npmjs.org (`npm view dist.integrity`), and a scratch `npm ci --registry=https://registry.npmjs.org` installs clean.
